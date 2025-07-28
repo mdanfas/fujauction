@@ -32,19 +32,17 @@ def get_minimum_remaining_time():
 
     soup = BeautifulSoup(response.content, 'html.parser')
     
-    # --- ### ACTION REQUIRED #1: EDIT THIS ONE LINE ### ---
-    # Find all timer elements. You MUST replace 'span' and 'AutionTimer'
-    # with the correct HTML tag and class you found by inspecting the website.
-    timer_elements = soup.find_all('span', class_='AutionTimer') 
+    # This selector is now correct for the specified website.
+    timer_elements = soup.select('div.plate-actions span.AutionTimer')
     
     if not timer_elements:
         print("No auction timers found. The auction may be over.")
-        return None # Return None if no timers are found
+        return None
 
-    min_total_seconds = sys.maxsize # Start with a very large number
+    min_total_seconds = sys.maxsize
 
     for timer in timer_elements:
-        time_str = timer.get_text(strip=True) # E.g., "01:25:10" or "25:10"
+        time_str = timer.get_text(strip=True)
         parts = time_str.split(':')
         try:
             if len(parts) == 3: # HH:MM:SS
@@ -69,19 +67,44 @@ def get_minimum_remaining_time():
 
 def perform_full_scrape():
     """
-    ### ACTION REQUIRED #2: ADD YOUR SCRAPING LOGIC HERE ###
-    This function should scrape the plate numbers and their final prices.
-    It must return a list of lists. For example:
-    [['F 123', 50000], ['J 456', 75000]]
+    This function now correctly scrapes the plate numbers and prices from the website.
+    It returns a list of lists, e.g., [['F 123', 50000], ['J 456', 75000]]
     """
     print("Performing full data scrape...")
-    # This is placeholder data. Your real scraping logic for getting
-    # the plate number and price goes here.
-    scraped_data = [
-        ['F 123', 55000],
-        ['J 456', 82000],
-        ['L 789', 265000]
-    ]
+    try:
+        response = requests.get(AUCTION_URL)
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching the webpage: {e}")
+        return []
+
+    soup = BeautifulSoup(response.content, 'html.parser')
+    
+    scraped_data = []
+    # This selector finds each auction item container
+    auction_items = soup.select('div.plate-box')
+
+    for item in auction_items:
+        try:
+            # Find the plate number within the item container
+            plate_number_tag = item.select_one('div.plate-no span.value')
+            if not plate_number_tag:
+                continue
+            plate_number = plate_number_tag.get_text(strip=True)
+
+            # Find the price within the item container
+            price_tag = item.select_one('div.plate-price span.value')
+            if not price_tag:
+                continue
+            # Clean up the price string and convert to an integer
+            price_str = price_tag.get_text(strip=True).replace(',', '')
+            price = int(price_str)
+            
+            scraped_data.append([plate_number, price])
+        except (ValueError, AttributeError):
+            # Skip this item if there's an issue with finding tags or converting data
+            continue
+            
     return scraped_data
 
 def get_last_run_time():
@@ -102,11 +125,15 @@ def append_to_csv(scraped_data):
     file_exists = os.path.exists(LOG_FILE)
     existing_plates = set()
     if file_exists:
-        with open(LOG_FILE, 'r', newline='', encoding='utf-8') as f:
-            reader = csv.reader(f)
-            if next(reader, None): # Skip header if file not empty
-                for row in reader:
-                    if row: existing_plates.add(row[0])
+        try:
+            with open(LOG_FILE, 'r', newline='', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                if next(reader, None):
+                    for row in reader:
+                        if row: existing_plates.add(row[0])
+        except (IOError, csv.Error):
+             print("Warning: Could not read existing log file. It may be corrupted.")
+
 
     with open(LOG_FILE, 'a', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
@@ -156,6 +183,9 @@ if __name__ == "__main__":
 
     if should_run:
         data_to_log = perform_full_scrape()
-        append_to_csv(data_to_log)
-        record_run_time()
-        print("Scrape complete and timestamp recorded.")
+        if data_to_log:
+            append_to_csv(data_to_log)
+            record_run_time()
+            print("Scrape complete and timestamp recorded.")
+        else:
+            print("Scrape was performed, but no new data was found to log.")
